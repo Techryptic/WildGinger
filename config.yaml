@@ -1,0 +1,258 @@
+# Public example configuration; settings.py validates keys and values.
+# Replace YOUR_* model/deployment IDs and the synthetic gateway URL before scanning.
+# Update the endpoint allowlist when changing URLs. Keep credentials out of this file.
+# IMPORTANT: illustrative prices; verify actual rates before scan (including cache rates).
+
+# ---------- AWS / Bedrock ----------
+aws:
+  # Set profile to null to use the default credential chain instead of a named profile.
+  profile: default
+  region: us-east-1         # AWS region where your Bedrock models live
+
+# ---------- Models ----------
+# bedrock: model_id is a Bedrock model ID or inference-profile ARN.
+# openai_gpt: model_id replaces {deployment} in the full chat-completions URL.
+# Base URLs must not contain credentials, query strings or fragments.
+# max_tokens caps each response; prices are USD per million tokens.
+# prompt_caching is optional for supported Bedrock models; set cache prices if enabled.
+# send_temperature: false omits temperature for deployments that do not accept it.
+models:
+  # --- Anthropic (Bedrock) ---
+  mythos:
+    provider: bedrock
+    model_id: "YOUR_MYTHOS_MODEL_ID"
+    max_tokens: 8000
+    price_per_1m_input: 5.0
+    price_per_1m_output: 25.0
+    description: "Mythos"
+  opus48:
+    provider: bedrock
+    model_id: "YOUR_OPUS48_MODEL_ID"
+    max_tokens: 8000
+    price_per_1m_input: 5.0
+    price_per_1m_output: 25.0
+    description: "Opus 4.8"
+  opus46:
+    provider: bedrock
+    model_id: "YOUR_OPUS46_MODEL_ID"
+    max_tokens: 8000
+    price_per_1m_input: 5.0
+    price_per_1m_output: 25.0
+    description: "Opus 4.6"
+  sonnet46:
+    provider: bedrock
+    model_id: "YOUR_SONNET46_MODEL_ID"
+    max_tokens: 6000
+    price_per_1m_input: 3.0
+    price_per_1m_output: 15.0
+    description: "Sonnet 4.6"
+  sonnet45:
+    provider: bedrock
+    model_id: "YOUR_SONNET45_MODEL_ID"
+    max_tokens: 6000
+    price_per_1m_input: 3.0
+    price_per_1m_output: 15.0
+    description: "Sonnet 4.5"
+
+  # --- GPT gateway examples (synthetic endpoint; replace before use) ---
+  gpt56_cyber_red:
+    provider: openai_gpt
+    model_id: "YOUR_GPT56_CYBER_RED_DEPLOYMENT"
+    base_url: "https://gateway.example.invalid/{deployment}/chat/completions"
+    max_tokens: 6000
+    price_per_1m_input: 10.0
+    price_per_1m_output: 30.0
+    description: "GPT-5.6 Cyber Red"
+  gpt56_blue:
+    provider: openai_gpt
+    model_id: "YOUR_GPT56_BLUE_DEPLOYMENT"
+    base_url: "https://gateway.example.invalid/{deployment}/chat/completions"
+    max_tokens: 6000
+    price_per_1m_input: 10.0
+    price_per_1m_output: 30.0
+    description: "GPT-5.6 Blue"
+  gpt41:
+    provider: openai_gpt
+    model_id: "YOUR_GPT41_DEPLOYMENT"
+    base_url: "https://gateway.example.invalid/{deployment}/chat/completions"
+    max_tokens: 4000
+    price_per_1m_input: 2.0
+    price_per_1m_output: 8.0
+    description: "GPT-4.1"
+
+# ---------- Roles (which model does which job) ----------
+# model       = which entry from 'models' above this role uses
+# temperature = randomness/creativity: 0.0 = focused/consistent, higher = more varied
+# max_turns   = max back-and-forth steps that role's conversation may take (a safety cap)
+roles:
+  recon:    { model: opus48,      temperature: 0.2, max_turns: 120 }  # maps codebase + entry points
+  hunt:     { model: gpt56_blue, temperature: 0.4, max_turns: 400 }  # the bulk work: finds candidate issues
+  validate: { model: mythos,      temperature: 0.0, max_turns: 60 }   # legacy single-judge (used only if 'validation.judges' is empty)
+  trace:    { model: opus47,      temperature: 0.1, max_turns: 100 }  # reachability: can external input reach the bug?
+  judge1:   { model: mythos,      temperature: 0.0, max_turns: 60 }   # judging panel #1 (Anthropic)
+  judge2:   { model: gpt56_cyber_red, temperature: 0.0, max_turns: 60 }   # judging panel #2 (OpenAI, different vendor)
+  judge3:   { model: opus48,    temperature: 0.0, max_turns: 60 }   # judging panel #3 (tiebreak)
+  dedupe:   { model: gpt56_blue,    temperature: 0.0, max_turns: 40 }   # AI semantic dedupe (used only if dedupe.semantic: true)
+
+# ---------- Multi-judge validation (quorum) ----------
+validation:
+  judges: [judge1, judge2, judge3]  # roles that vote on each candidate finding (leave empty to use single 'validate')
+  quorum: 2                         # how many judges must agree to CONFIRM a finding (2-of-3 here)
+  require_reachable: true           # if true, unreachable findings are demoted to informational
+
+  parallel: true                    # validate findings concurrently (much faster)
+  skip_validation_below: low        # skip 3-judge quorum below this severity (none|low|medium|high)
+
+
+# ---------- Reachability handling ----------
+reachability:
+  enabled: true                     # turn reachability handling on/off
+  unreachable_handling: informational  # informational = separate report section · hide = drop · report = treat normally
+
+# ---------- Dedupe (noise control BEFORE the expensive validation) ----------
+dedupe:
+  merge_same_location: true         # collapse "20 findings, same endpoint, same attack class" into one
+  semantic: true                    # ALSO use AI to merge same-root-cause dupes (runs BEFORE the judges so no judge tokens are wasted on duplicates)
+  semantic_role: dedupe             # which role (→ model) does the semantic dedupe pass
+
+# ---------- Indexing backend (symbols + call graph) ----------
+indexing:
+  backend: auto                     # auto (tree-sitter if installed, else regex) | tree_sitter | regex
+
+# ---------- Preflight ----------
+preflight:
+  enabled: true                     # test each model with one tiny call before scanning (fail fast on bad ARN/gateway)
+
+
+# ---------- Loop / budget (safety ceilings, NOT targets) ----------
+budget:
+  max_time_minutes: 120     # hard wall-clock stop for the whole scan
+  max_cost_usd: 25          # HARD spend stop: aborts the run mid-flight when the measured cost reaches this (must be > 0)
+  max_passes: 10            # max full re-sweeps of the code (backstop; normal exit is convergence)
+  convergence_passes: 2     # stop after this many passes in a row find NO new confirmed findings
+
+# ---------- Concurrency ----------
+concurrency:
+  hunters: 12                    # parallel review tasks; respect provider rate limits
+
+
+# ---------- Resilience ----------
+resilience:
+  max_resume_attempts: 20   # if a model call drops mid-conversation, how many times to resume it
+  backoff_cap_seconds: 300  # longest wait between retries (jittered: actual sleep is random in [0, this])
+  max_retry_seconds: 480    # total time one turn may spend sleeping in backoff; keep under the 600s cell lease
+
+# ---------- Scope (what gets scanned) ----------
+scope:
+  path: ./target_repo       # folder to scan (override at runtime with --path)
+  mode: full                # full = scan everything · incremental = only files changed since last run
+  artifact_categories: [code, iac, config]                       # which file types to include (iac = Terraform/Docker/K8s)
+  include_languages: [python, javascript, typescript, java, go, c, cpp]  # which code languages to analyze
+  exclude_dirs: [.git, node_modules, target, venv, dist, build, .venv, __pycache__]  # folders to skip entirely
+  max_file_kb: 800          # skip files larger than this many KB (avoids giant data/minified files)
+  scan_unknown_extensions: true  # scan unrecognized TEXT files via the generic path (so nothing is missed)
+  binary_extensions: [.png, .jpg, .jpeg, .gif, .bmp, .ico, .svg, .webp,   # file types treated as binary and skipped
+                      .pdf, .zip, .gz, .tar, .tgz, .7z, .rar, .bz2, .xz,
+                      .so, .dll, .dylib, .exe, .bin, .o, .a, .class, .jar,
+                      .woff, .woff2, .ttf, .otf, .eot,
+                      .mp4, .mov, .avi, .mkv, .mp3, .wav, .flac, .ogg,
+                      .pyc, .pyo, .wasm, .db, .sqlite]
+  chunk_lines: 150          # how many source lines per analysis "chunk" (bigger = fewer/cheaper pieces, coarser review)
+  chunk_overlap_lines: 20   # lines each chunk overlaps its neighbor (so a bug on a boundary isn't split/missed)
+
+# ---------- Navigation tool limits (protect the model's context window) ----------
+tools:
+  max_result_tokens: 4000   # cap on how much a single file-read/search returns to the model
+  list_default_depth: 1     # how deep directory listings go by default
+
+# ---------- Hunting ----------
+hunting:
+  attack_classes: [injection, authz, authn, crypto, deserialization,   # vulnerability categories to check
+                   ssrf, path_traversal, xss, secrets, logic, misconfig, csrf, all]  # (fewer = faster; each multiplies the work)
+  # OR bundle classes into GROUPS — one cell per (chunk, GROUP) instead of per
+  # (chunk, class): full called-out coverage at (groups)x cost instead of (classes)x.
+  # Set only ONE of attack_classes / attack_class_groups (both set = config refused).
+  # attack_class_groups:
+  #   - [injection, path_traversal, ssrf, xss, deserialization]   # tainted-flow family
+  #   - [authn, authz, crypto, csrf]                              # identity & access
+  #   - [logic, misconfig, secrets]                               # logic & config
+  open_ended: true          # adds ONE open-ended cell per chunk — with attack_classes it needs 'all' listed; with attack_class_groups it is added automatically
+
+# ---------- Hybrid seeding (optional import of existing SAST findings) — OFF by default ----------
+seeding:
+  mode: llm_only            # llm_only = fresh scan · hybrid = LLM + imported findings · triage_only = only re-check imports
+  fortify_sarif: null       # path to a Fortify SARIF/FPR export to triage (or null)
+  generic_sarif: []         # paths to other SAST SARIF files to import
+  blackduck_report: null    # optional BlackDuck SCA export for enrichment
+
+# ---------- Deterministic local rules (no LLM needed) ----------
+rules:
+  enabled: true             # run built-in pattern checks (weak crypto, eval, hardcoded secrets, etc.)
+  dir: ./rules              # folder holding rule definitions
+  org_patterns: null        # optional path to your org-specific anti-pattern YAML
+
+# ---------- Sanitization (protect secrets before anything is sent) ----------
+sanitization:
+  mode: redact              # redact = mask secrets (default) · block = refuse to send if a secret is present · off
+  entropy_threshold: 4.0    # how "random-looking" a string must be to be treated as a possible secret (higher = stricter)
+  quarantine_extensions: [.env, .pem, .key, .p12]  # file types never sent to the model at all
+
+# ---------- Quality / noise control ----------
+quality:
+  thoroughness_min: 0.7            # a cell must score at least this thorough to count as "analyzed" (else re-queued). Effective steps are 0.0/0.4/0.8/1.0, so anything in (0.4, 0.8] behaves the same
+  max_shallow_attempts: 2          # stop re-hunting a cell after this many attempts with NO improvement (it read the code and found nothing; asking again just costs money). Cells that read nothing at all are never settled this way
+  hedge_penalty: true              # lower confidence on wishy-washy findings ("might possibly…")
+  language_aware_fp: true          # apply a stricter bar for languages prone to false positives
+
+# ---------- Governance & local data protection ----------
+governance:
+  engagement_context_file: null    # optional file stating your authorization/scope (added to the system prompt)
+  # Every HTTP model endpoint must match an allowed origin and path subtree.
+  # Replace the synthetic gateway here and in models before use; there is no private default.
+  allowed_model_endpoints:
+    - "https://gateway.example.invalid/"
+  data_protection:
+    restrict_permissions: true      # lock output files (DB, audit logs) to your account only
+
+
+# ---------- Baselines & suppressions ----------
+baseline:
+  file: null                # path to baseline.json; null = no baseline
+  mode: new_only            # new_only = only fail CI on NET-NEW findings · all = fail on everything >= threshold
+suppressions:
+  file: null                # path to suppressions.yaml (per-finding mutes with reason/owner/expiry)
+
+# ---------- Output ----------
+output:
+  formats: [json, sarif, markdown]  # which report formats to write
+  severity_threshold: medium        # minimum severity to include/gate on (low | medium | high | critical)
+  fail_on_incomplete_coverage: true # return a non-zero exit code if not 100% of cells were analyzed
+  out_dir: ./wildginger_output      # where results are written (override at runtime with --output)
+
+# ---------- PoC (proof-of-concept artifacts) ----------
+poc:
+  generate: true            # generate a human-runnable PoC file per confirmed finding (always inert)
+  include_sample_request: true  # attach a deterministic MALICIOUS sample request (curl) to reachable endpoint findings (built from the parsed route/params, not an LLM)
+  llm_route_resolution: true    # if the deterministic walk can't find the HTTP route, let an LLM find it (its answer is VERIFIED against source; unverified routes are discarded, never guessed)
+  route_resolver_role: trace    # which role (→ model) does the LLM route-resolution fallback
+
+
+
+# ---------- Monitoring (MLflow experiment tracking) ----------
+# Optional call metrics and tracing. Prompt/response capture is disabled for privacy.
+monitoring:
+  mlflow:
+    enabled: false                    # turn MLflow logging on/off
+    tracking_uri: null                # e.g. "file:./mlruns" or "http://mlflow:5000" (null = MLflow default)
+    experiment: WildGinger          # default experiment (CLI --experiment overrides this per scan)
+    experiment_per_target: true       # give each scanned app its OWN experiment (auto-named from --path) so per-app cost is separate
+    run_name: null                    # optional run name (null = auto: "<target> <timestamp>")
+    tracing: true                     # emit call spans when monitoring is enabled
+    log_io: false                     # do not capture prompt or response text
+    log_prompts: true                 # register the stage prompt templates in the MLflow Prompt Registry
+
+
+# ---------- Versioning (reproducibility) ----------
+versioning:
+  prompts_version: v1       # label for the prompt set used (so runs can be compared/reproduced)
+  taxonomy_version: v1      # label for the attack-class taxonomy version

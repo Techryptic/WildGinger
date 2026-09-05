@@ -1,0 +1,11 @@
+boto3
+pydantic>=2
+PyYAML
+tenacity
+
+# Symbol/call-graph indexing; the scanner falls back to regex if unavailable.
+tree-sitter
+tree-sitter-language-pack
+
+# Optional at runtime; monitoring is disabled by default.
+mlflow

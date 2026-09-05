@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+
+# Credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+config.local.yaml
+config.local.yml
+config.*.local.yaml
+config.*.local.yml
+
+# Scan output and local run data
+wildginger_output/
+scan_output/
+scan_output_*/
+mlruns/
+mlartifacts/
+mlflow.db
+mlflow.db-*
+scan_state.db
+scan_state.db-*
+baseline.json
+suppressions.local.yaml
